@@ -319,14 +319,21 @@ async function changePack(id,delta){
   if(x)x.packed_qty=qty;else packItems.push({concert_id:c.id,product_id:id,packed_qty:qty});
   if(tab==='packing'){render();scrollToPackSummary()}
   const f=$('packFeedback');if(f)f.textContent=`✓ ${byId(id)?.name||'Artikel'}: ${qty} Stück für dieses Konzert erfasst`;
- }catch(e){err(e)}
+  return true;
+ }catch(e){err(e);return false}
 }
 async function setPacked(value){const c=currentConcert();if(!c)return;if(!navigator.onLine)return alert('Zum Bestätigen bitte online sein.');if(value&&!confirm('Packen abschließen? Danach zeigt die Konzertkasse nur die mitgenommenen Artikel.'))return;if(!value&&!confirm('Packliste wieder öffnen und Mengen bearbeiten?'))return;try{await rpc('xiv_pack_set_status',{p_concert:c.id,p_packed:value});const x=packStates.find(x=>x.concert_id===c.id);if(x)x.is_packed=value;else packStates.push({concert_id:c.id,is_packed:value});render();if(value)scrollToPackSummary()}catch(e){err(e)}}
-function addPackQR(raw){
+async function addPackQR(raw){
  const b=boxFromQR(raw),p=b?byId(b.product_id):findQRProduct(raw);
- if(!p)return alert('Artikel nicht gefunden. Bitte QR-Code oder SKU prüfen.');
- if(Number(p.current_stock)<=0)return alert('Artikel nicht mehr lagernd: '+p.name+' · '+(p.variant||'')+'. Kein Zugang zur Packliste.');
- changePack(p.id,1);
+ if(!p){alert('QR-Code erkannt, aber kein passender Artikel gefunden. Gelesener Inhalt: '+String(raw).slice(0,220));return false}
+ if(Number(p.current_stock)<=0){alert('Artikel erkannt, aber nicht mehr lagernd: '+p.name+' · '+(p.variant||''));return false}
+ const c=currentConcert();
+ if(!c||c.closed){alert('Artikel erkannt, aber bitte zuerst ein offenes Konzert auswählen.');return false}
+ if(isPacked()){alert('Artikel erkannt, aber die Packliste ist bereits bestätigt. Bitte zuerst wieder öffnen.');return false}
+ if(!navigator.onLine){alert('Artikel erkannt, aber zum Speichern der Packliste ist eine Internetverbindung nötig.');return false}
+ try{
+  return await changePack(p.id,1)===true;
+ }catch(e){alert('Artikel erkannt, aber die Buchung ist fehlgeschlagen: '+(e?.message||String(e)));return false}
 }
 function manualPackScan(){const v=prompt('Artikel-QR-Code / Artikelnummer / SKU:');if(v!==null)addPackQR(v)}
 async function startPackScanner(){
@@ -341,7 +348,7 @@ async function startPackScanner(){
   packScanTimer=setInterval(async()=>{
    if(packBusy||v.readyState<2||tab!=='packing')return;
    packBusy=true;
-   try{const raw=await readQRFrame(v,detector);if(raw){stopPackScanner();addPackQR(raw)}}catch(e){}finally{packBusy=false}
+   try{const raw=await readQRFrame(v,detector);if(raw){stopPackScanner();await addPackQR(raw)}}catch(e){}finally{packBusy=false}
   },350);
  }catch(e){stopPackScanner();alert('Kamera konnte nicht gestartet werden: '+e.message)}
 }
