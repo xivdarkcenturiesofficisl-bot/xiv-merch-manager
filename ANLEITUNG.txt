@@ -1,0 +1,17 @@
+XIV DARK CENTURIES – INSTALLIERBARE WEB-APP (PWA)
+
+1. Vorhandene funktionierende GitHub-Version zunächst sichern.
+2. Alle 6 Dateien aus diesem ZIP ins HAUPTVERZEICHNIS des GitHub-Repositories hochladen:
+   index.html, manifest.webmanifest, sw.js, icon-192.png, icon-512.png, apple-touch-icon.png
+   Bei GitHub: Add file > Upload files > Commit changes.
+3. Auf dem Samsung-Handy in Chrome öffnen:
+   https://xivdarkcenturiesofficisl-bot.github.io/xiv-merch-manager/
+4. Browser-Menü (drei Punkte) > App installieren oder Zum Startbildschirm hinzufügen.
+5. App über das neue XIV-Merch-Symbol starten.
+
+WICHTIG: Nicht die lokale index.html (content:// oder file://) auf dem Handy öffnen.
+Die Kamera benötigt HTTPS und eine Kameraberechtigung.
+Für Erstinstallation und Anmeldung Internet verwenden.
+Die bestehende Offline-Verkaufswarteschlange wurde nicht verändert; Offline-Kasse,
+QR-Erkennung und Synchronisierung müssen mit euren Geräten praktisch getestet werden.
+Keine SQL-Änderung nötig. Bestehende Daten in Supabase bleiben erhalten.
