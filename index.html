@@ -159,7 +159,7 @@ async function startWarehouseScanner(){
  panel.style.display='block';
  if(!navigator.mediaDevices?.getUserMedia){$('warehouseStatus').textContent='Kamera nicht verfügbar. Bitte Artikelnummer manuell eingeben.';return}
  if(!('BarcodeDetector' in window)){$('warehouseStatus').textContent='Dieser Browser unterstützt BarcodeDetector nicht. Bitte Artikelnummer manuell eingeben oder die normale Handykamera verwenden.';return}
- try{const detector=('BarcodeDetector' in window)?new BarcodeDetector({formats:['qr_code']}):null;warehouseStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'}},audio:false});const video=$('warehouseVideo');if(!video){stopWarehouseScanner();return}video.srcObject=warehouseStream;await video.play();$('warehouseStatus').textContent='QR-Code vor die Kamera halten';warehouseTimer=setInterval(async()=>{if(warehouseBusy||tab!=='products'||video.readyState<2)return;warehouseBusy=true;try{const raw=await readQRFrame(video,detector);if(raw)warehouseQRResult(raw)}catch(e){}finally{warehouseBusy=false}},400)}catch(e){stopWarehouseScanner();panel.style.display='block';$('warehouseStatus').textContent='Kamera konnte nicht gestartet werden: '+e.message}
+ try{const detector=('BarcodeDetector' in window)?new BarcodeDetector({formats:['qr_code']}):null;warehouseStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'},width:{ideal:1920},height:{ideal:1080}},audio:false});const video=$('warehouseVideo');if(!video){stopWarehouseScanner();return}video.srcObject=warehouseStream;await video.play();$('warehouseStatus').textContent='QR-Code vor die Kamera halten';warehouseTimer=setInterval(async()=>{if(warehouseBusy||tab!=='products'||video.readyState<2)return;warehouseBusy=true;try{const raw=await readQRFrame(video,detector);if(raw)warehouseQRResult(raw)}catch(e){}finally{warehouseBusy=false}},400)}catch(e){stopWarehouseScanner();panel.style.display='block';$('warehouseStatus').textContent='Kamera konnte nicht gestartet werden: '+e.message}
 }
 function filterProducts(v){search=v;const q=v.toLowerCase(),arr=products.filter(p=>(p.name+' '+p.variant+' '+(p.sku||'')).toLowerCase().includes(q));$('productList').innerHTML=productRows(arr);$('count').textContent=' '+arr.length+' Artikel'}
 // Produktfotos werden in Supabase Storage gespeichert, nicht nur im Browser.
@@ -233,14 +233,39 @@ function stopPOSScanner(){if(posScanTimer){clearInterval(posScanTimer);posScanTi
 
 // QR-Fallback: Samsung Internet erkennt manche Codes nicht mit BarcodeDetector.
 const qrFrameCanvas=document.createElement('canvas');
+let qrFrameCounter=0;
 async function readQRFrame(video,detector){
+ // BarcodeDetector ist schnell, jsQR dient als unabhängiger Fallback.
  if(detector){try{const hits=await detector.detect(video);if(hits.length)return hits[0].rawValue}catch(e){}}
  if(typeof jsQR!=='function')return null;
  const w=video.videoWidth,h=video.videoHeight;if(!w||!h)return null;
- const scale=Math.min(1,900/Math.max(w,h));qrFrameCanvas.width=Math.round(w*scale);qrFrameCanvas.height=Math.round(h*scale);
- const ctx=qrFrameCanvas.getContext('2d',{willReadFrequently:true});ctx.drawImage(video,0,0,qrFrameCanvas.width,qrFrameCanvas.height);
- const img=ctx.getImageData(0,0,qrFrameCanvas.width,qrFrameCanvas.height);
- return jsQR(img.data,img.width,img.height,{inversionAttempts:'attemptBoth'})?.data||null;
+ const ctx=qrFrameCanvas.getContext('2d',{willReadFrequently:true});
+ const attempt=(sx,sy,sw,sh,maxDim)=>{
+  const scale=Math.min(1,maxDim/Math.max(sw,sh));
+  const cw=Math.max(1,Math.round(sw*scale)),ch=Math.max(1,Math.round(sh*scale));
+  if(qrFrameCanvas.width!==cw)qrFrameCanvas.width=cw;
+  if(qrFrameCanvas.height!==ch)qrFrameCanvas.height=ch;
+  ctx.drawImage(video,sx,sy,sw,sh,0,0,cw,ch);
+  const data=ctx.getImageData(0,0,cw,ch);
+  return jsQR(data.data,cw,ch,{inversionAttempts:'dontInvert'})?.data||null;
+ };
+ // Wechselnde Aufloesungen und Zuschnitte: dichte QR-Codes brauchen mehr Pixel.
+ const frame=qrFrameCounter++%3;
+ try{
+  if(frame===0)return attempt(0,0,w,h,1600);
+  if(frame===1)return attempt(0,0,w,h,Math.min(2400,Math.max(w,h)));
+  const side=Math.min(w,h)*0.85;
+  return attempt((w-side)/2,(h-side)/2,side,side,1600);
+ }catch(e){return null}
+}
+async function improveQRFocus(stream){
+ try{
+  const track=stream?.getVideoTracks?.()[0];if(!track)return;
+  const caps=track.getCapabilities?.()||{};
+  const settings={};
+  if(caps.focusMode?.includes('continuous'))settings.focusMode='continuous';
+  if(Object.keys(settings).length)await track.applyConstraints({advanced:[settings]});
+ }catch(e){} // Manche Handys unterstuetzen diese Einstellung nicht.
 }
 function findQRProduct(raw){
  const v=String(raw||'').trim();if(!v)return null;
@@ -263,8 +288,8 @@ async function startPOSScanner(){
  stopPOSScanner();panel.style.display='block';
  try{
   const detector=('BarcodeDetector' in window)?new BarcodeDetector({formats:['qr_code']}):null;
-  posCameraStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'}},audio:false});
-  const video=$('qrVideo');if(!video){stopPOSScanner();return}video.srcObject=posCameraStream;await video.play();
+  posCameraStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'},width:{ideal:1920},height:{ideal:1080}},audio:false});
+  const video=$('qrVideo');if(!video){stopPOSScanner();return}video.srcObject=posCameraStream;await video.play();await improveQRFocus(posCameraStream);
   if($('qrScannerStatus'))$('qrScannerStatus').textContent='QR-Code vor die Kamera halten';
   posScanTimer=setInterval(async()=>{
    if(posScanBusy||!video||video.readyState<2||tab!=='pos')return;
@@ -342,9 +367,9 @@ async function startPackScanner(){
  stopPackScanner();const panel=$('packScannerPanel');if(!panel)return;panel.style.display='block';
  try{
   const detector=('BarcodeDetector' in window)?new BarcodeDetector({formats:['qr_code']}):null;
-  packCameraStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'}},audio:false});
-  const v=$('packVideo');v.srcObject=packCameraStream;await v.play();
-  $('packScanStatus').textContent='QR-Code mittig vor die Kamera halten; nach Erkennung erneut starten';
+  packCameraStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'},width:{ideal:1920},height:{ideal:1080}},audio:false});
+  const v=$('packVideo');v.srcObject=packCameraStream;await v.play();await improveQRFocus(packCameraStream);
+  $('packScanStatus').textContent='QR-Code mittig vor die Kamera halten; bei kleinen Codes näher herangehen';
   packScanTimer=setInterval(async()=>{
    if(packBusy||v.readyState<2||tab!=='packing')return;
    packBusy=true;
