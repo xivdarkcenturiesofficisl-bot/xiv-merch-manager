@@ -2,11 +2,12 @@
   "id": "./",
   "name": "XIV Dark Centuries Merch Manager",
   "short_name": "XIV Merch",
-  "description": "Merchandising, Konzertpacken und Konzertkasse für XIV Dark Centuries",
+  "description": "Merch, Lager, Konzertpacken und Konzertkasse für XIV Dark Centuries",
+  "lang": "de",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
-  "background_color": "#0b0b0e",
+  "background_color": "#101115",
   "theme_color": "#111111",
   "icons": [
     {
