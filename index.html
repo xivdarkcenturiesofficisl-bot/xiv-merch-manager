@@ -263,7 +263,9 @@ async function editProduct(id){const p=byId(id);const name=prompt('Artikelname',
 async function newProduct(){const name=prompt('Artikelname');if(!name)return;const variant=prompt('Größe / Variante','')||'';const sku=''; const price=Number(prompt('Verkaufspreis','20'));const stock=Number(prompt('Anfangsbestand','0'));if(!Number.isInteger(stock)||stock<0||!Number.isFinite(price)||price<0)return alert('Ungültige Werte');if(!confirm('Neuen Artikel anlegen?'))return;try{await rpc('xiv_create_product',{p_name:name,p_variant:variant,p_sku:sku,p_price:price,p_stock:stock,p_location:''});await load()}catch(e){err(e)}}
 function concertSelect(){return `<select onchange="concertId=this.value;cart={};render()">${concerts.map(c=>`<option value="${c.id}" ${c.id===concertId?'selected':''}>${esc(c.event_date||'')} · ${esc(c.name)}${c.closed?' (geschlossen)':''}</option>`).join('')}</select>`}
 function pos(){const c=currentConcert();if(!c)return '<div class="panel">Bitte zuerst ein Konzert anlegen.</div>';const items=Object.entries(cart).filter(([id,q])=>q>0&&byId(id));const total=items.reduce((a,[id,q])=>a+Number(byId(id).price)*q,0);return `<div class="row space"><h2>Konzertkasse</h2>${concertSelect()}</div>${c.closed?'<div class="panel danger">Dieser Konzertverkauf ist geschlossen.</div>':''}<div class="grid"><div class="panel"><h3>Artikel auswählen · QR oder manuell</h3><div class="row" style="margin-bottom:12px"><button class="primary" onclick="startPOSScanner()">📷 QR-Code scannen</button><button onclick="manualQRInput()">⌨ QR-Code eingeben</button></div><p class="muted">${isPacked()?'Nur Artikel der bestätigten Konzert-Packliste sind verkäuflich.':'⛔ Bitte zuerst unter Konzert packen die Mitnahme bestätigen. Die Kasse ist bis dahin gesperrt.'}</p><div id="qrScannerPanel" style="display:none;margin-bottom:12px"><video id="qrVideo" autoplay playsinline muted style="width:100%;max-height:290px;background:#000;border-radius:8px"></video><p id="qrScannerStatus" class="muted">Kamera wird gestartet …</p><button onclick="stopPOSScanner()">Scanner schließen</button></div><input type="search" id="possearch" placeholder="Artikel suchen" oninput="filterPOS(this.value)"><div id="posproducts">${posRows(isPacked()?concertPackProducts():[])}</div></div><div class="panel"><h3>Warenkorb</h3><div id="basket">${items.map(([id,q])=>`<div class="product"><div class="grow">${esc(byId(id).name)} ${esc(byId(id).variant)}</div><button onclick="changeCart('${id}',-1)">−</button><strong>${q}</strong><button onclick="changeCart('${id}',1)">+</button><span>${money(q*byId(id).price)}</span></div>`).join('')||'<p class="muted">Noch keine Artikel gewählt.</p>'}</div><h2>Gesamt: ${money(total)}</h2><label>Zahlungsart <select id="payment"><option>Bar</option><option>Karte</option><option>PayPal</option></select></label><p><button class="primary" id="pay" onclick="checkout()" ${c.closed||!isPacked()||!items.length?'disabled':''}>Verkauf verbindlich buchen</button></p><p class="muted">Belege werden zuerst lokal gespeichert und bei Verbindung übertragen. Bei mehreren Offline-Geräten können Bestandskonflikte entstehen; offene Buchungen prüfen.</p></div></div>`}
-function posRows(arr){return arr.map(p=>`<div class="product"><div class="grow"><strong>${esc(p.name)}</strong> ${p.variant?`<span class="size">${esc(p.variant)}</span>`:''}<div>${money(p.price)} · ${p.current_stock} verfügbar</div></div><button onclick="changeCart('${p.id}',1)" ${p.current_stock<1||currentConcert()?.closed?'disabled':''}>+ Hinzufügen</button></div>`).join('')}
+function soldForConcert(id){return sales.filter(s=>s.concert_id===concertId&&s.product_id===id&&s.source==='concert').reduce((n,s)=>n+Number(s.qty||0),0)}
+function remainingConcert(id){return Math.max(0,packedFor(id)-soldForConcert(id))}
+function posRows(arr){return arr.map(p=>`<div class="product"><div class="grow"><strong>${esc(p.name)}</strong> ${p.variant?`<span class="size">${esc(p.variant)}</span>`:''}<div>${money(p.price)} · ${remainingConcert(p.id)} Konzert-Restbestand</div></div><button onclick="changeCart('${p.id}',1)" ${remainingConcert(p.id)<1||currentConcert()?.closed?'disabled':''}>+ Hinzufügen</button></div>`).join('')}
 
 // Konzertkasse: Kamera-QR und manuelle Artikelauswahl teilen denselben Warenkorb.
 let posCameraStream=null,posScanTimer=null,posScanBusy=false;
@@ -315,7 +317,7 @@ function addScannedProduct(raw){
  const box=boxFromQR(raw);
  const p=box?byId(box.product_id):findQRProduct(raw);if(!p){alert('QR-Code gehört zu keinem bekannten Artikel. Bitte Artikel manuell auswählen.');return false}
  const c=currentConcert();if(!c||c.closed||!isPacked()||packedFor(p.id)<1){alert('Artikel nicht auf der bestätigten Konzert-Packliste oder Konzert nicht geöffnet.');return false}
- const before=cart[p.id]||0;cart[p.id]=before+1;if(navigator.onLine&&cart[p.id]>Number(p.current_stock||0)){cart[p.id]=before;return false}if(!posScanTimer)render();else if($('qrScannerStatus'))$('qrScannerStatus').textContent='✓ '+p.name+' hinzugefügt · Scanner bleibt geöffnet';scanTone();return true;
+ const before=cart[p.id]||0;if(before>=remainingConcert(p.id)){alert('Konzert-Restbestand aufgebraucht.');return false}cart[p.id]=before+1;if(navigator.onLine&&cart[p.id]>Number(p.current_stock||0)){cart[p.id]=before;return false}if(!posScanTimer)render();else if($('qrScannerStatus'))$('qrScannerStatus').textContent='✓ '+p.name+' hinzugefügt · Scanner bleibt geöffnet';scanTone();return true;
 }
 function manualQRInput(){const v=prompt('Artikel-QR-Link, Artikel-ID oder SKU eingeben:');if(v!==null)addScannedProduct(v)}
 async function startPOSScanner(){try{const A=window.AudioContext||window.webkitAudioContext;if(A&&!scanAudio)scanAudio=new A();scanAudio?.resume?.().catch(()=>{})}catch(e){}
@@ -338,7 +340,7 @@ async function startPOSScanner(){try{const A=window.AudioContext||window.webkitA
 }
 
 function filterPOS(v){$('posproducts').innerHTML=posRows((isPacked()?concertPackProducts():[]).filter(p=>(p.name+' '+p.variant+' '+(p.sku||'')).toLowerCase().includes(v.toLowerCase())))}
-function changeCart(id,delta){if(!isPacked()||packedFor(id)<1)return alert('Nur mitgenommene Artikel dürfen verkauft werden.');cart[id]=Math.max(0,(cart[id]||0)+delta);if(navigator.onLine&&cart[id]>Number(byId(id)?.current_stock||0)){cart[id]--;return alert('Nicht genug Bestand')}if(!cart[id])delete cart[id];render()}
+function changeCart(id,delta){if(!isPacked()||packedFor(id)<1)return alert('Nur mitgenommene Artikel dürfen verkauft werden.');if(delta>0&&(cart[id]||0)+delta>remainingConcert(id))return alert('Nicht genügend Konzert-Restbestand.');cart[id]=Math.max(0,(cart[id]||0)+delta);if(navigator.onLine&&cart[id]>Number(byId(id)?.current_stock||0)){cart[id]--;return alert('Nicht genug Bestand')}if(!cart[id])delete cart[id];render()}
 async function checkout(){const c=currentConcert();if(!c||c.closed||!isPacked())return alert('Bitte Konzert zuerst als gepackt bestätigen.');if(Object.keys(cart).some(id=>packedFor(id)<1))return alert('Warenkorb enthält Artikel außerhalb der Packliste.');const items=Object.entries(cart).filter(([id,q])=>q>0).map(([id,qty])=>({id,qty,price:Number(byId(id).price)}));if(!items.length)return;const payment=$('payment').value;const total=items.reduce((a,x)=>a+x.qty*x.price,0);if(!confirm(`${items.reduce((a,x)=>a+x.qty,0)} Artikel für ${money(total)} (${payment}) verkaufen?`))return;
  const receipt={tx:uuid(),concert:c.id,payment,items,userId:user.id,at:Date.now()};
  try{await queueAction('put',receipt)}catch(e){return alert('Lokale Speicherung fehlgeschlagen. Verkauf NICHT gebucht: '+e.message)}
@@ -357,19 +359,25 @@ function isPacked(){return !!packStates.find(x=>x.concert_id===concertId&&x.is_p
 function concertPackProducts(){return products.filter(p=>packedFor(p.id)>0)}
 function scrollToPackSummary(){requestAnimationFrame(()=>{const el=$('packSummary');if(el)el.scrollIntoView({behavior:'smooth',block:'start'})})}
 function packedFor(id){return Number(packItems.find(x=>x.concert_id===concertId&&x.product_id===id)?.packed_qty||0)}
+function merchGroup(p){const n=(p?.name||'').toLowerCase();if(/shirt|t-shirt|hoodie|zip|tank top|longsleeve|pullover/.test(n))return 0;if(/\bcd\b|digipack|jewelcase/.test(n))return 1;if(/\blp\b|vinyl|schallplatte/.test(n))return 2;return 3}
+function merchSize(p){const v=(p?.variant||'').toUpperCase().replace(/\s/g,'');const order=['XXXS','3XS','XXS','2XS','XS','S','M','L','XL','XXL','2XL','XXXL','3XL','4XL','5XL','6XL'];const i=order.indexOf(v);return i<0?99:i}
+function sortMerchProducts(arr){return arr.slice().sort((a,b)=>merchGroup(a)-merchGroup(b)||(a.name||'').localeCompare(b.name||'','de',{sensitivity:'base'})||merchSize(a)-merchSize(b)||(a.variant||'').localeCompare(b.variant||'','de'))}
+function sortPackEntries(arr){return arr.slice().sort((a,b)=>{const x=byId(a.product_id),y=byId(b.product_id);return merchGroup(x)-merchGroup(y)||(x?.name||'').localeCompare(y?.name||'','de',{sensitivity:'base'})||merchSize(x)-merchSize(y)||(x?.variant||'').localeCompare(y?.variant||'','de')})}
+async function setPackQuantity(id,absolute){const p=byId(id);if(!p)return;const old=packedFor(id);let value=absolute;if(value===undefined){const answer=prompt('Gesamtmenge für '+p.name+' '+(p.variant||'')+' (0 = entfernen):',String(old));if(answer===null)return;value=Number(answer)}if(!Number.isSafeInteger(value)||value<0)return alert('Bitte eine gültige ganze Stückzahl eingeben.');if(value===old)return;return changePack(id,value-old)}
+async function addPackQuantity(id){const p=byId(id);if(!p)return;const answer=prompt('Wie viele Stück von '+p.name+' '+(p.variant||'')+' zusätzlich packen?', '1');if(answer===null)return;const qty=Number(answer);if(!Number.isSafeInteger(qty)||qty<1)return alert('Bitte eine gültige ganze Stückzahl eingeben.');return await changePack(id,qty)}
 function packingView(){
  const c=currentConcert();
  if(!c)return '<div class="panel">Bitte zuerst ein Konzert anlegen.</div>';
- const items=packItems.filter(x=>x.concert_id===concertId&&x.packed_qty>0);
+ const items=sortPackEntries(packItems.filter(x=>x.concert_id===concertId&&x.packed_qty>0));
  return `<div class="row space"><h2>📦 Konzert packen</h2>${concertSelect()}</div>
- <div class="panel"><h3>Mitgenommene Artikel erfassen ${isPacked()?'· ✅ Konzert gepackt':'· ⏳ Packen läuft'}</h3><p class="muted">Beim Packen QR-Code auf jedem Produkt scannen oder Artikel manuell auswählen. Jeder Scan erhöht die Packmenge um 1. Das ist kein Verkauf und verändert den Lagerbestand nicht.</p>
+ <div class="panel"><h3>Mitgenommene Artikel erfassen ${isPacked()?'· ✅ Konzert gepackt':'· ⏳ Packen läuft'}</h3><p class="muted">Beim Packen QR-Code auf jedem Produkt scannen oder Artikel manuell auswählen. Nach jedem Scan kannst du die zusätzliche Stückzahl eingeben. Das ist kein Verkauf und verändert den Lagerbestand nicht.</p>
  <div class="row"><button class="primary" onclick="startPackScanner()">📷 Artikel scannen</button><button onclick="manualPackScan()">⌨ QR / SKU eingeben</button><button onclick="printConcertTally()">🖨 Verkaufs-Strichliste drucken</button></div>
  <div id="packScannerPanel" style="display:none;margin-top:12px"><video id="packVideo" autoplay playsinline muted style="width:100%;max-width:430px;border-radius:8px"></video><p id="packScanStatus">Kamera wird gestartet …</p><button onclick="stopPackScanner()">Scanner schließen</button></div>
  <p id="packFeedback" class="good"></p><input type="search" placeholder="Artikel manuell suchen" oninput="filterPackProducts(this.value)" id="packSearch"><div id="packProducts">${packProductRows(products.filter(p=>Number(p.current_stock)>0))}</div></div>
  <div class="panel" id="packSummary"><h3>Mitgenommen: ${items.reduce((n,x)=>n+x.packed_qty,0)} Stück · ${items.length} Varianten</h3>
- <div class="scroll"><table><tr><th>Artikel</th><th>Größe</th><th>Preis</th><th>Menge</th><th>Aktion</th></tr>${items.map(x=>{const p=byId(x.product_id);return `<tr><td>${esc(p?.name||x.product_id)}</td><td>${esc(p?.variant||'')}</td><td>${money(p?.price||0)}</td><td>${x.packed_qty}</td><td><button onclick="changePack('${x.product_id}',-1)">−1</button> <button onclick="changePack('${x.product_id}',1)">+1</button></td></tr>`}).join('')}</table></div><p><button class="primary" onclick="printConcertTally()">🖨 Strichliste mit Preisen und Unterschriften drucken</button> ${isPacked()?`<button onclick="setPacked(false)">🔓 Packliste erneut öffnen</button>`:`<button class="primary" onclick="setPacked(true)" ${items.length?'':'disabled'}>✅ Packen abschließen · Konzert als gepackt markieren</button>`}</p></div>`;
+ <div class="scroll"><table><tr><th>Artikel</th><th>Größe</th><th>Preis</th><th>Menge</th><th>Aktion</th></tr>${items.map(x=>{const p=byId(x.product_id);return `<tr><td>${esc(p?.name||x.product_id)}</td><td>${esc(p?.variant||'')}</td><td>${money(p?.price||0)}</td><td>${x.packed_qty}</td><td><button onclick="setPackQuantity('${x.product_id}')">✏️ Menge eingeben</button> <button onclick="changePack('${x.product_id}',-1)">−1</button></td></tr>`}).join('')}</table></div><p><button class="primary" onclick="printConcertTally()">🖨 Strichliste mit Preisen und Unterschriften drucken</button> ${isPacked()?`<button onclick="setPacked(false)">🔓 Packliste erneut öffnen</button>`:`<button class="primary" onclick="setPacked(true)" ${items.length?'':'disabled'}>✅ Packen abschließen · Konzert als gepackt markieren</button>`}</p></div>`;
 }
-function packProductRows(items){return items.filter(p=>Number(p.current_stock)>0).slice(0,80).map(p=>`<div class="product"><div class="grow">${esc(p.name)} · ${esc(p.variant)} <span class="muted">(${money(p.price)})</span></div><button onclick="changePack('${p.id}',1)">+ Zum Konzert</button></div>`).join('')}
+function packProductRows(items){return sortMerchProducts(items.filter(p=>Number(p.current_stock)>0)).slice(0,80).map(p=>`<div class="product"><div class="grow">${esc(p.name)} · ${esc(p.variant)} <span class="muted">(${money(p.price)})</span></div><button onclick="addPackQuantity('${p.id}')">+ Menge eingeben</button></div>`).join('')}
 function filterPackProducts(v){const q=v.toLowerCase();$('packProducts').innerHTML=packProductRows(products.filter(p=>Number(p.current_stock)>0&&(p.name+' '+p.variant+' '+(p.sku||'')).toLowerCase().includes(q)))}
 async function changePack(id,delta){
  const c=currentConcert();if(!c||c.closed)return alert('Bitte offenes Konzert wählen.');
@@ -380,7 +388,7 @@ async function changePack(id,delta){
   const qty=await rpc('xiv_pack_change',{p_concert:c.id,p_product:id,p_delta:delta});
   const x=packItems.find(x=>x.concert_id===c.id&&x.product_id===id);
   if(x)x.packed_qty=qty;else packItems.push({concert_id:c.id,product_id:id,packed_qty:qty});
-  if(tab==='packing'&&!packScanTimer){render();scrollToPackSummary()}
+  if(tab==='packing'&&!packScanTimer){render();scrollToPackSummary()}else if(tab==='packing'){const f=$('packFeedback');if(f)f.textContent='✓ Menge gespeichert: '+qty+' Stück';}
   const f=$('packFeedback');if(f)f.textContent=`✓ ${byId(id)?.name||'Artikel'}: ${qty} Stück für dieses Konzert erfasst`;
   return true;
  }catch(e){err(e);return false}
@@ -395,7 +403,7 @@ async function addPackQR(raw){
  if(isPacked()){alert('Artikel erkannt, aber die Packliste ist bereits bestätigt. Bitte zuerst wieder öffnen.');return false}
  if(!navigator.onLine){alert('Artikel erkannt, aber zum Speichern der Packliste ist eine Internetverbindung nötig.');return false}
  try{
-  return await changePack(p.id,1)===true;
+  return await addPackQuantity(p.id)===true;
  }catch(e){alert('Artikel erkannt, aber die Buchung ist fehlgeschlagen: '+(e?.message||String(e)));return false}
 }
 function manualPackScan(){const v=prompt('Artikel-QR-Code / Artikelnummer / SKU:');if(v!==null)addPackQR(v)}
@@ -417,7 +425,7 @@ async function startPackScanner(){try{const A=window.AudioContext||window.webkit
 }
 function printConcertTally(){
  const c=currentConcert();if(!c)return alert('Bitte Konzert wählen.');
- const rows=packItems.filter(x=>x.concert_id===c.id&&x.packed_qty>0).map(x=>({p:byId(x.product_id),qty:x.packed_qty})).filter(x=>x.p);
+ const rows=sortPackEntries(packItems.filter(x=>x.concert_id===c.id&&x.packed_qty>0)).map(x=>({p:byId(x.product_id),qty:x.packed_qty})).filter(x=>x.p);
  if(!rows.length)return alert('Bitte zuerst Artikel für dieses Konzert erfassen.');
  const w=window.open('','_blank');if(!w)return alert('Bitte Pop-ups erlauben.');
  const sum=rows.reduce((n,x)=>n+x.qty*Number(x.p.price||0),0);
@@ -425,9 +433,17 @@ function printConcertTally(){
  w.document.write(html);w.document.close();
 }
 
-function concertList(){return `<div class="row space"><h2>Konzerte</h2>${isAdmin()?'<button class="primary" onclick="newConcert()">+ Konzert anlegen</button>':''}</div><div class="panel scroll"><table><tr><th>Datum</th><th>Konzert</th><th>Ort</th><th>Status</th><th>Aktion</th></tr>${concerts.map(c=>`<tr><td>${esc(c.event_date||'')}</td><td>${esc(c.name)}</td><td>${esc(c.venue||'')}</td><td>${c.closed?'Geschlossen':'Offen'}</td><td>${isAdmin()?`<button onclick="setClosed('${c.id}',${!c.closed})">${c.closed?'Wieder öffnen':'Verkauf schließen'}</button> <button style="border-color:#b33;color:#ff7777" onclick="cancelConcert('${c.id}')">Verkäufe stornieren</button> <button style="border-color:#b33;color:#ff7777" onclick="deleteConcert('${c.id}')">Konzert löschen</button>`:''}</td></tr>`).join('')}</table></div>`}
+function concertList(){return `<div class="row space"><h2>Konzerte</h2>${isAdmin()?'<button class="primary" onclick="newConcert()">+ Konzert anlegen</button>':''}</div><div class="panel scroll"><table><tr><th>Datum</th><th>Konzert</th><th>Ort</th><th>Status</th><th>Aktion</th></tr>${concerts.map(c=>`<tr><td>${esc(c.event_date||'')}</td><td>${esc(c.name)}</td><td>${esc(c.venue||'')}</td><td>${c.closed?'Geschlossen':'Offen'}</td><td>${isAdmin()?`<button onclick="setClosed('${c.id}',${!c.closed})">${c.closed?'Wieder öffnen':'Verkauf schließen'}</button> <button style="border-color:#b33;color:#ff7777" onclick="cancelConcert('${c.id}')">Verkäufe stornieren</button>`:''}</td></tr>`).join('')}</table></div>`}
 async function newConcert(){const name=prompt('Konzertname');if(!name)return;const date=prompt('Datum (JJJJ-MM-TT)',new Date().toISOString().slice(0,10));if(date===null)return;const venue=prompt('Ort / Club','');if(venue===null)return;try{await rpc('xiv_create_concert',{p_name:name,p_date:date||null,p_venue:venue});await load()}catch(e){err(e)}}
-async function setClosed(id,closed){if(!confirm(`Konzertverkauf ${closed?'schließen':'wieder öffnen'}?`))return;try{await rpc('xiv_set_concert_closed',{p_id:id,p_closed:closed});await load()}catch(e){err(e)}}
+async function setClosed(id,closed){
+ if(!navigator.onLine)return alert('Konzertabschluss ist nur online möglich.');
+ if(!closed)return alert('Ein abgeschlossenes Konzert bleibt zum Schutz der Abrechnung im Archiv. Bitte nicht erneut öffnen.');
+ const pending=await queueAction('all');
+ if(pending.some(x=>x.concert===id))return alert('Auf diesem Gerät sind noch nicht synchronisierte Verkäufe für das Konzert. Bitte zuerst synchronisieren.');
+ const c=concerts.find(x=>x.id===id);
+ if(!confirm(`Konzert ${c?.name||''} schließen?\nWICHTIG: Alle anderen Bandmitglieder müssen ihre Offline-Verkäufe vorher synchronisiert haben.\n\nDiese Version nutzt noch die bisherige Lagerbuchung beim Verkauf. Fortfahren?`))return;
+ try{await rpc('xiv_set_concert_closed',{p_id:id,p_closed:true});await load()}catch(e){err(e)}
+}
 function reports(){const grouped=new Map();for(const s of sales){const c=concerts.find(c=>c.id===s.concert_id);const k=s.concert_id||'other';if(!grouped.has(k))grouped.set(k,{name:c?.name||'Andere Verkäufe',qty:0,total:0});const x=grouped.get(k);x.qty+=Number(s.qty);x.total+=Number(s.qty)*Number(s.unit_price)}return `<h2>Verkäufe & Auswertung</h2><div class="panel scroll"><table><tr><th>Konzert</th><th>Stück</th><th>Umsatz</th></tr>${[...grouped.values()].map(x=>`<tr><td>${esc(x.name)}</td><td>${x.qty}</td><td>${money(x.total)}</td></tr>`).join('')}</table></div><div class="panel"><h3>Verkaufspositionen</h3><button onclick="exportSales()">CSV exportieren</button><div class="scroll"><table><tr><th>Datum</th><th>Artikel</th><th>Konzert</th><th>Menge</th><th>Preis</th><th>Quelle</th><th>Aktion</th></tr>${sales.slice().sort((a,b)=>b.created_at.localeCompare(a.created_at)).slice(0,300).map(s=>`<tr><td>${esc(new Date(s.created_at).toLocaleString('de-DE'))}</td><td>${esc(byId(s.product_id)?.name||s.product_id)}</td><td>${esc(concerts.find(c=>c.id===s.concert_id)?.name||'')}</td><td>${s.qty}</td><td>${money(s.unit_price)}</td><td>${esc(s.source)}</td><td>${isAdmin()&&s.source==='concert'?`<button onclick="cancelSale('${s.id}')">Stornieren</button>`:'—'}</td></tr>`).join('')}</table></div></div>`}
 async function cancelSale(id){
  if(!isAdmin()||!navigator.onLine)return alert('Nur Admins und nur online.');
